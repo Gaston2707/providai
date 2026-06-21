@@ -173,15 +173,34 @@ exports.handler = async (event) => {
       const today = new Date();
       const dateStr = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`;
 
+      // Primero GET MuestraCausas para obtener JuzgadoElegido y Set reales
+      const muestraRes = await makeRequest(`${MEV_BASE}/MuestraCausas.asp?radio=xCa&pOrden=xCa&pOrdenAD=Asc`, {
+        headers: { Cookie: sessionCookie, Referer: `${MEV_BASE}/POSLoguin.asp` },
+      });
+      const muestraHtml = muestraRes.body;
+      
+      // Extraer JuzgadoElegido del select
+      const juzMatch = muestraHtml.match(/name="JuzgadoElegido"[^>]*value="([^"]+)"/i) ||
+                       muestraHtml.match(/id="JuzgadoElegido"[^>]*value="([^"]+)"/i) ||
+                       muestraHtml.match(/<option[^>]*selected[^>]*value="([A-Z]{2,4}\d+)"/i) ||
+                       muestraHtml.match(/value="([A-Z]{2,4}\d{3,})"/);
+      const realJuzgado = juzMatch ? juzMatch[1] : (juzgadoElegido || "");
+      
+      // Extraer Set
+      const setMatch = muestraHtml.match(/name="Set"[^>]*value="(\d+)"/i) ||
+                       muestraHtml.match(/id="Set"[^>]*value="(\d+)"/i) ||
+                       muestraHtml.match(/<option[^>]*value="(\d{5,})"/i);
+      const realSet = setMatch ? setMatch[1] : (setId || "");
+
       const searchData = querystring.stringify({
         OpcionBusqueda: "0",
         busca: caratula,
-        JuzgadoElegido: juzgadoElegido || "",
+        JuzgadoElegido: realJuzgado,
         radio: "xCa",
         caratula: caratula,
         NCausa: "",
         NInterno: "",
-        Set: setId || "",
+        Set: realSet,
         Desde: "01/01/2020",
         Hasta: dateStr,
         SetNovedades: "",
