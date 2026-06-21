@@ -22,8 +22,8 @@ async function mevGetOrganismos(depto, sessionCookie) {
 }
 
 // Buscar expedientes por carátula
-async function mevBuscar(caratula, organismo, depto, sessionCookie) {
-  return mevRequest("buscar", { caratula, organismo, depto, sessionCookie });
+async function mevBuscar(caratula, organismo, depto, sessionCookie, juzgadoElegido, setId) {
+  return mevRequest("buscar", { caratula, organismo, depto, sessionCookie, juzgadoElegido, setId });
 }
 
 // Obtener el último proveído de un expediente

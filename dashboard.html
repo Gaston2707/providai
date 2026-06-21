@@ -231,6 +231,8 @@
 let currentUser = null;
 let currentProfile = null;
 let mevSession = null; // cookies de sesión MEV
+let mevJuzgado = null; // JuzgadoElegido de MEV
+let mevSetId = null; // Set ID de MEV
 let currentDepto = null;
 let currentOrganismo = null;
 let pendingProveido = null; // proveido pendiente de guardar
@@ -320,6 +322,8 @@ async function connectMEV() {
     }
 
     mevSession = res.cookies;
+    mevJuzgado = res.juzgadoElegido || "";
+    mevSetId = res.setId || "";
     currentDepto = depto;
     currentOrganismo = organismo;
 
@@ -368,7 +372,7 @@ async function buscarExpedientes() {
   container.innerHTML = '<p style="color:var(--gray-500); font-size:0.88rem; padding:0.5rem 0;">Buscando en MEV...</p>';
 
   try {
-    const res = await mevBuscar(caratula, currentOrganismo, currentDepto, mevSession);
+    const res = await mevBuscar(caratula, currentOrganismo, currentDepto, mevSession, mevJuzgado, mevSetId);
 
     if (!res.success || !res.expedientes?.length) {
       container.innerHTML = `
