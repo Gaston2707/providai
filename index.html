@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProvidAI — Iniciar Sesión</title>
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<div class="auth-page">
+
+  <!-- LEFT PANEL -->
+  <div class="auth-left">
+    <div class="auth-left-content">
+      <div class="auth-logo-big">
+        <div class="logo-icon">⚖️</div>
+        <div class="logo-text">Provid<span>AI</span></div>
+      </div>
+      <p class="auth-tagline">Tu proveído, siempre a mano</p>
+      <div class="auth-features">
+        <div class="auth-feature">
+          <div class="auth-feature-icon">🔍</div>
+          <span>Búsqueda instantánea de expedientes en MEV</span>
+        </div>
+        <div class="auth-feature">
+          <div class="auth-feature-icon">📋</div>
+          <span>Extracción automática del último proveído</span>
+        </div>
+        <div class="auth-feature">
+          <div class="auth-feature-icon">📊</div>
+          <span>Exportación a Excel con un solo clic</span>
+        </div>
+        <div class="auth-feature">
+          <div class="auth-feature-icon">⚖️</div>
+          <span>Todos los departamentos judiciales de PBA</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="auth-right">
+
+    <!-- TAB SELECTOR -->
+    <div style="display:flex; gap:0; margin-bottom:2rem; border-bottom:2px solid var(--gray-100);">
+      <button class="tab-btn active" id="tab-login" onclick="showTab('login')"
+        style="flex:1; padding:10px; background:none; border:none; font-family:inherit; font-size:0.92rem; font-weight:600; color:var(--navy); border-bottom:2px solid var(--navy); margin-bottom:-2px; cursor:pointer;">
+        Iniciar Sesión
+      </button>
+      <button class="tab-btn" id="tab-register" onclick="showTab('register')"
+        style="flex:1; padding:10px; background:none; border:none; font-family:inherit; font-size:0.92rem; font-weight:500; color:var(--gray-500); border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer;">
+        Registrarse
+      </button>
+    </div>
+
+    <!-- ALERT -->
+    <div id="alert" style="display:none;" class="alert"></div>
+
+    <!-- LOGIN FORM -->
+    <div id="form-login">
+      <h2>Bienvenido</h2>
+      <div class="gold-rule"></div>
+      <p class="auth-subtitle">Ingresá con tu cuenta ProvidAI</p>
+
+      <div class="form-group">
+        <label class="form-label">Correo electrónico</label>
+        <input type="email" id="login-email" class="form-input" placeholder="tu@email.com" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contraseña</label>
+        <input type="password" id="login-password" class="form-input" placeholder="••••••••" />
+      </div>
+
+      <button class="btn btn-primary" id="btn-login" onclick="handleLogin()" style="margin-top:0.5rem;">
+        Iniciar Sesión
+      </button>
+
+      <div class="auth-link" style="margin-top:1rem;">
+        <a href="#" onclick="showTab('register'); return false;">¿No tenés cuenta? Registrate</a>
+      </div>
+    </div>
+
+    <!-- REGISTER FORM -->
+    <div id="form-register" style="display:none;">
+      <h2>Crear cuenta</h2>
+      <div class="gold-rule"></div>
+      <p class="auth-subtitle">Completá el formulario. Un administrador aprobará tu acceso.</p>
+
+      <div class="form-group">
+        <label class="form-label">Nombre completo</label>
+        <input type="text" id="reg-name" class="form-input" placeholder="Dr. Juan Pérez" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Correo electrónico</label>
+        <input type="email" id="reg-email" class="form-input" placeholder="tu@email.com" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contraseña</label>
+        <input type="password" id="reg-password" class="form-input" placeholder="Mínimo 6 caracteres" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirmar contraseña</label>
+        <input type="password" id="reg-password2" class="form-input" placeholder="Repetí la contraseña" />
+      </div>
+
+      <button class="btn btn-primary" id="btn-register" onclick="handleRegister()" style="margin-top:0.5rem;">
+        Solicitar Acceso
+      </button>
+
+      <div class="auth-link" style="margin-top:1rem;">
+        <a href="#" onclick="showTab('login'); return false;">¿Ya tenés cuenta? Iniciá sesión</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/auth.js"></script>
+<script>
+// Check if already logged in
+(async () => {
+  const user = await getCurrentUser();
+  if (user) {
+    const profile = await getUserProfile(user.id).catch(() => null);
+    if (profile?.role === "admin") window.location.href = "/admin.html";
+    else if (profile?.approved) window.location.href = "/dashboard.html";
+    else window.location.href = "/pending.html";
+  }
+})();
+
+function showTab(tab) {
+  document.getElementById("form-login").style.display = tab === "login" ? "block" : "none";
+  document.getElementById("form-register").style.display = tab === "register" ? "block" : "none";
+  document.getElementById("tab-login").style.cssText += tab === "login"
+    ? "color:var(--navy);border-bottom:2px solid var(--navy);font-weight:600;"
+    : "color:var(--gray-500);border-bottom:2px solid transparent;font-weight:500;";
+  document.getElementById("tab-register").style.cssText += tab === "register"
+    ? "color:var(--navy);border-bottom:2px solid var(--navy);font-weight:600;"
+    : "color:var(--gray-500);border-bottom:2px solid transparent;font-weight:500;";
+  hideAlert();
+}
+
+function showAlert(msg, type = "error") {
+  const el = document.getElementById("alert");
+  el.className = `alert alert-${type}`;
+  el.textContent = msg;
+  el.style.display = "flex";
+}
+function hideAlert() {
+  document.getElementById("alert").style.display = "none";
+}
+
+async function handleLogin() {
+  hideAlert();
+  const email = document.getElementById("login-email").value.trim();
+  const pass = document.getElementById("login-password").value;
+  if (!email || !pass) return showAlert("Completá todos los campos.");
+
+  const btn = document.getElementById("btn-login");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Ingresando...';
+
+  const { data, error } = await db.auth.signInWithPassword({ email, password: pass });
+
+  if (error) {
+    showAlert("Email o contraseña incorrectos.");
+    btn.disabled = false;
+    btn.innerHTML = "Iniciar Sesión";
+    return;
+  }
+
+  const profile = await getUserProfile(data.user.id).catch(() => null);
+  if (!profile) return showAlert("Error al obtener el perfil.");
+
+  if (profile.role === "admin") window.location.href = "/admin.html";
+  else if (profile.approved) window.location.href = "/dashboard.html";
+  else window.location.href = "/pending.html";
+}
+
+async function handleRegister() {
+  hideAlert();
+  const name = document.getElementById("reg-name").value.trim();
+  const email = document.getElementById("reg-email").value.trim();
+  const pass = document.getElementById("reg-password").value;
+  const pass2 = document.getElementById("reg-password2").value;
+
+  if (!name || !email || !pass || !pass2) return showAlert("Completá todos los campos.");
+  if (pass !== pass2) return showAlert("Las contraseñas no coinciden.");
+  if (pass.length < 6) return showAlert("La contraseña debe tener al menos 6 caracteres.");
+
+  const btn = document.getElementById("btn-register");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Registrando...';
+
+  const { data, error } = await db.auth.signUp({ email, password: pass });
+
+  if (error) {
+    showAlert(error.message || "Error al registrarse.");
+    btn.disabled = false;
+    btn.innerHTML = "Solicitar Acceso";
+    return;
+  }
+
+  // Create profile (pending approval)
+  const { error: profileError } = await db.from("profiles").insert({
+    id: data.user.id,
+    full_name: name,
+    email: email,
+    approved: false,
+    role: "lawyer",
+  });
+
+  if (profileError) {
+    showAlert("Error al crear el perfil. Contactá al administrador.");
+    btn.disabled = false;
+    btn.innerHTML = "Solicitar Acceso";
+    return;
+  }
+
+  showAlert("✅ Solicitud enviada. Un administrador revisará tu cuenta y recibirás un mail cuando sea aprobada.", "success");
+  btn.disabled = false;
+  btn.innerHTML = "Solicitar Acceso";
+  document.getElementById("reg-name").value = "";
+  document.getElementById("reg-email").value = "";
+  document.getElementById("reg-password").value = "";
+  document.getElementById("reg-password2").value = "";
+}
+
+// Enter key support
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    if (document.getElementById("form-login").style.display !== "none") handleLogin();
+    else handleRegister();
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProvidAI — Dashboard</title>
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+  <a href="/dashboard.html" class="logo">
+    <div class="logo-icon">⚖️</div>
+    <div>
+      <span class="logo-text">Provid<span>AI</span></span>
+      <span class="logo-tagline">Tu proveído, siempre a mano</span>
+    </div>
+  </a>
+  <div class="navbar-right">
+    <span class="navbar-user" id="user-name">Cargando...</span>
+    <button class="btn-logout" onclick="signOut()">Cerrar sesión</button>
+  </div>
+</nav>
+
+<div class="dashboard-layout">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Principal</div>
+      <a class="sidebar-item active" onclick="showSection('buscar')">
+        <span class="sidebar-icon">🔍</span> Buscar Expediente
+      </a>
+      <a class="sidebar-item" onclick="showSection('historial')">
+        <span class="sidebar-icon">📋</span> Mis Expedientes
+      </a>
+      <a class="sidebar-item" onclick="showSection('exportar')">
+        <span class="sidebar-icon">📊</span> Exportar Excel
+      </a>
+    </div>
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Cuenta</div>
+      <a class="sidebar-item" onclick="showSection('credenciales')">
+        <span class="sidebar-icon">🔑</span> Credenciales MEV
+      </a>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main-content">
+
+    <!-- ALERT GLOBAL -->
+    <div id="global-alert" style="display:none;" class="alert"></div>
+
+    <!-- ═══ SECTION: BUSCAR ═══ -->
+    <section id="section-buscar">
+      <div class="page-header">
+        <h2>Buscar Expediente</h2>
+        <p>Conectate a MEV y buscá por carátula</p>
+      </div>
+
+      <!-- STEPS -->
+      <div class="steps">
+        <div class="step" id="step-1" class="active">
+          <div class="step-num">1</div> Departamento
+        </div>
+        <div class="step-arrow">›</div>
+        <div class="step" id="step-2">
+          <div class="step-num">2</div> Organismo
+        </div>
+        <div class="step-arrow">›</div>
+        <div class="step" id="step-3">
+          <div class="step-num">3</div> Buscar
+        </div>
+        <div class="step-arrow">›</div>
+        <div class="step" id="step-4">
+          <div class="step-num">4</div> Proveído
+        </div>
+      </div>
+
+      <!-- STEP 1: DEPTO + CONNECT -->
+      <div class="card" id="card-step1">
+        <div class="card-header">
+          <span class="card-title">⚖️ Conexión a MEV</span>
+          <span id="mev-status" style="font-size:0.8rem; color:var(--gray-500);">Desconectado</span>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;" id="mev-inputs">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Departamento Judicial</label>
+            <select id="sel-depto" class="form-select">
+              <option value="">Seleccioná un departamento</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Organismo</label>
+            <select id="sel-organismo" class="form-select" disabled>
+              <option value="">Primero seleccioná depto.</option>
+            </select>
+          </div>
+        </div>
+
+        <button class="btn btn-gold" id="btn-connect" onclick="connectMEV()" style="margin-top:1rem;">
+          🔗 Conectar a MEV
+        </button>
+      </div>
+
+      <!-- STEP 2: BUSQUEDA -->
+      <div class="card" id="card-step2" style="display:none;">
+        <div class="card-header">
+          <span class="card-title">🔍 Buscar por Carátula</span>
+          <button class="btn btn-sm btn-outline" onclick="resetSearch()">Nueva búsqueda</button>
+        </div>
+        <div class="search-bar">
+          <input type="text" id="input-caratula" class="form-input" placeholder="Ingresá el nombre de la parte actora..." />
+          <button class="btn btn-primary" id="btn-buscar" onclick="buscarExpedientes()" style="width:auto; min-width:120px;">
+            Buscar
+          </button>
+        </div>
+        <div id="resultados-busqueda"></div>
+      </div>
+
+      <!-- STEP 3: RESULTADO PROVEIDO -->
+      <div class="card" id="card-step3" style="display:none;">
+        <div class="card-header">
+          <span class="card-title">📄 Último Proveído</span>
+          <button class="btn btn-sm btn-gold" onclick="guardarProveido()">💾 Guardar</button>
+        </div>
+        <div id="proveido-content"></div>
+      </div>
+
+    </section>
+
+    <!-- ═══ SECTION: HISTORIAL ═══ -->
+    <section id="section-historial" style="display:none;">
+      <div class="page-header">
+        <h2>Mis Expedientes</h2>
+        <p>Historial de proveídos consultados</p>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">📋 Expedientes guardados</span>
+          <button class="btn btn-sm btn-gold" onclick="exportarExcel()">📊 Exportar Excel</button>
+        </div>
+        <div class="table-wrapper">
+          <table id="tabla-historial">
+            <thead>
+              <tr>
+                <th>Parte Actora</th>
+                <th>Demandado</th>
+                <th>Jurisdicción</th>
+                <th>Juzgado</th>
+                <th>Expediente</th>
+                <th>Movimiento</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="historial-body">
+              <tr><td colspan="7"><div class="empty-state"><div class="empty-state-icon">📂</div><p>No hay expedientes guardados todavía</p></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ SECTION: EXPORTAR ═══ -->
+    <section id="section-exportar" style="display:none;">
+      <div class="page-header">
+        <h2>Exportar a Excel</h2>
+        <p>Descargá todos tus proveídos en formato Excel</p>
+      </div>
+      <div class="card" style="text-align:center; padding:3rem;">
+        <div style="font-size:4rem; margin-bottom:1rem;">📊</div>
+        <h3 style="margin-bottom:0.5rem;">Exportar expedientes</h3>
+        <p style="color:var(--gray-500); margin-bottom:2rem; font-size:0.9rem;">
+          Se exportarán todos tus expedientes guardados con las columnas:<br>
+          <strong>Parte Actora · Demandado · Jurisdicción · Juzgado · Expediente · Movimiento · Texto del Proveído</strong>
+        </p>
+        <button class="btn btn-gold" onclick="exportarExcel()" style="min-width:200px;">
+          📥 Descargar Excel
+        </button>
+      </div>
+    </section>
+
+    <!-- ═══ SECTION: CREDENCIALES ═══ -->
+    <section id="section-credenciales" style="display:none;">
+      <div class="page-header">
+        <h2>Credenciales MEV</h2>
+        <p>Tus credenciales se guardan de forma segura en la base de datos</p>
+      </div>
+      <div class="card" style="max-width:440px;">
+        <div class="card-header">
+          <span class="card-title">🔑 Usuario y Contraseña MEV</span>
+        </div>
+        <div id="cred-alert" style="display:none;" class="alert"></div>
+        <div class="form-group">
+          <label class="form-label">Usuario MEV</label>
+          <input type="text" id="cred-user" class="form-input" placeholder="Tu usuario de MEV" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Contraseña MEV</label>
+          <input type="password" id="cred-pass" class="form-input" placeholder="Tu contraseña de MEV" />
+        </div>
+        <button class="btn btn-primary" onclick="guardarCredenciales()">💾 Guardar Credenciales</button>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- MODAL PROVEIDO DETALLE -->
+<div class="modal-overlay" id="modal-proveido" style="display:none;">
+  <div class="modal" style="max-width:600px;">
+    <h3>📄 Texto del Proveído</h3>
+    <div class="gold-rule"></div>
+    <div class="proveido-box" id="modal-proveido-text"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="document.getElementById('modal-proveido').style.display='none'">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/mev.js"></script>
+<script src="js/excel.js"></script>
+<script>
+let currentUser = null;
+let currentProfile = null;
+let mevSession = null; // cookies de sesión MEV
+let currentDepto = null;
+let currentOrganismo = null;
+let pendingProveido = null; // proveido pendiente de guardar
+
+// ── INIT ──
+(async () => {
+  const result = await requireApproved();
+  if (!result) return;
+  currentUser = result.user;
+  currentProfile = result.profile;
+
+  document.getElementById("user-name").textContent = currentProfile.full_name || currentUser.email;
+
+  // Poblar departamentos
+  const sel = document.getElementById("sel-depto");
+  MEV_DEPTOS.forEach(d => {
+    if (d.value === "0") return;
+    const opt = document.createElement("option");
+    opt.value = d.value;
+    opt.textContent = d.label;
+    sel.appendChild(opt);
+  });
+
+  // Cargar credenciales MEV si existen
+  if (currentProfile.mev_username) {
+    document.getElementById("cred-user").value = currentProfile.mev_username;
+  }
+
+  // Cargar historial
+  await loadHistorial();
+})();
+
+// ── SIDEBAR NAV ──
+function showSection(name) {
+  ["buscar","historial","exportar","credenciales"].forEach(s => {
+    document.getElementById(`section-${s}`).style.display = "none";
+  });
+  document.querySelectorAll(".sidebar-item").forEach(el => el.classList.remove("active"));
+  document.getElementById(`section-${name}`).style.display = "block";
+  event?.target?.closest(".sidebar-item")?.classList.add("active");
+  if (name === "historial") loadHistorial();
+}
+
+// ── ALERT ──
+function showAlert(msg, type = "error", target = "global-alert") {
+  const el = document.getElementById(target);
+  if (!el) return;
+  el.className = `alert alert-${type}`;
+  el.textContent = msg;
+  el.style.display = "flex";
+  setTimeout(() => el.style.display = "none", 6000);
+}
+
+// ── STEP INDICATOR ──
+function setStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById(`step-${i}`);
+    if (!el) continue;
+    el.className = "step" + (i < n ? " done" : i === n ? " active" : "");
+  }
+}
+
+// ── CONNECT MEV ──
+async function connectMEV() {
+  const depto = document.getElementById("sel-depto").value;
+  const organismo = document.getElementById("sel-organismo").value;
+  if (!depto) return showAlert("Seleccioná un departamento judicial.");
+
+  // Get MEV credentials from profile
+  const { data: profile } = await db.from("profiles").select("mev_username, mev_password").eq("id", currentUser.id).single();
+  if (!profile?.mev_username || !profile?.mev_password) {
+    return showAlert("⚠️ Primero guardá tus credenciales MEV en la sección 'Credenciales MEV'.", "warning");
+  }
+
+  const btn = document.getElementById("btn-connect");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner spinner-dark"></span> Conectando...';
+
+  try {
+    const res = await mevLogin(profile.mev_username, profile.mev_password, depto);
+
+    if (!res.success) {
+      showAlert("❌ Credenciales MEV incorrectas. Revisalas en 'Credenciales MEV'.", "error");
+      btn.disabled = false;
+      btn.innerHTML = "🔗 Conectar a MEV";
+      return;
+    }
+
+    mevSession = res.cookies;
+    currentDepto = depto;
+    currentOrganismo = organismo;
+
+    document.getElementById("mev-status").innerHTML = '<span style="color:var(--green);">● Conectado</span>';
+    document.getElementById("card-step2").style.display = "block";
+    setStep(3);
+
+    showAlert("✅ Conectado a MEV correctamente.", "success");
+  } catch(e) {
+    showAlert("Error al conectar con MEV: " + e.message);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = "🔗 Reconectar";
+}
+
+// Cargar organismos al cambiar depto
+document.getElementById("sel-depto").addEventListener("change", async function() {
+  const depto = this.value;
+  const selOrg = document.getElementById("sel-organismo");
+  selOrg.innerHTML = '<option value="">Cargando organismos...</option>';
+  selOrg.disabled = true;
+
+  if (!depto) {
+    selOrg.innerHTML = '<option value="">Seleccioná un depto primero</option>';
+    return;
+  }
+
+  // Por ahora cargamos un set genérico - se actualizará post-login con los reales
+  selOrg.innerHTML = '<option value="">Todos los organismos</option><option value="todos">Buscar en todos</option>';
+  selOrg.disabled = false;
+  setStep(2);
+});
+
+// ── BUSCAR EXPEDIENTES ──
+async function buscarExpedientes() {
+  const caratula = document.getElementById("input-caratula").value.trim();
+  if (!caratula) return showAlert("Ingresá el nombre de la parte actora.");
+  if (!mevSession) return showAlert("Primero conectate a MEV.");
+
+  const btn = document.getElementById("btn-buscar");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  const container = document.getElementById("resultados-busqueda");
+  container.innerHTML = '<p style="color:var(--gray-500); font-size:0.88rem; padding:0.5rem 0;">Buscando en MEV...</p>';
+
+  try {
+    const res = await mevBuscar(caratula, currentOrganismo, currentDepto, mevSession);
+
+    if (!res.success || !res.expedientes?.length) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">🔍</div>
+          <p>No se encontraron expedientes para "<strong>${caratula}</strong>"</p>
+        </div>`;
+      btn.disabled = false;
+      btn.innerHTML = "Buscar";
+      return;
+    }
+
+    let html = `<div class="table-wrapper"><table><thead><tr>
+      <th>Carátula</th><th>Organismo</th><th>Expediente</th><th>Acción</th>
+    </tr></thead><tbody>`;
+
+    res.expedientes.forEach((exp, i) => {
+      html += `<tr>
+        <td class="td-main">${exp.caratula || "—"}</td>
+        <td>${exp.organismo || "—"}</td>
+        <td>${exp.expediente || "—"}</td>
+        <td><button class="btn btn-sm btn-gold" onclick="verProveido('${encodeURIComponent(exp.url)}', '${encodeURIComponent(exp.caratula)}')">Ver proveído</button></td>
+      </tr>`;
+    });
+
+    html += "</tbody></table></div>";
+    container.innerHTML = html;
+    setStep(3);
+
+  } catch(e) {
+    container.innerHTML = `<div class="alert alert-error">Error al buscar: ${e.message}</div>`;
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = "Buscar";
+}
+
+// ── VER PROVEIDO ──
+async function verProveido(encodedUrl, encodedCaratula) {
+  const url = decodeURIComponent(encodedUrl);
+  const card = document.getElementById("card-step3");
+  const content = document.getElementById("proveido-content");
+  card.style.display = "block";
+  content.innerHTML = '<p style="color:var(--gray-500);">Obteniendo último proveído...</p>';
+  card.scrollIntoView({ behavior: "smooth" });
+
+  try {
+    const res = await mevGetProveido(url, mevSession, currentDepto, currentOrganismo);
+
+    if (!res.success) {
+      content.innerHTML = '<div class="alert alert-error">No se pudo obtener el proveído.</div>';
+      return;
+    }
+
+    const d = res.data;
+    pendingProveido = d;
+
+    // Determinar label del depto
+    const deptoLabel = MEV_DEPTOS.find(x => x.value === currentDepto)?.label || currentDepto;
+    d.jurisdiccion = deptoLabel;
+
+    content.innerHTML = `
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+        <div><label class="form-label">Parte Actora</label><p style="font-size:0.92rem;">${d.parteActora || "—"}</p></div>
+        <div><label class="form-label">Demandado</label><p style="font-size:0.92rem;">${d.demandado || "—"}</p></div>
+        <div><label class="form-label">Jurisdicción</label><p style="font-size:0.92rem;">${d.jurisdiccion || "—"}</p></div>
+        <div><label class="form-label">Juzgado</label><p style="font-size:0.92rem;">${d.juzgado || "—"}</p></div>
+        <div><label class="form-label">Expediente</label><p style="font-size:0.92rem;">${d.expediente || "—"}</p></div>
+        <div><label class="form-label">Movimiento</label><p style="font-size:0.92rem;">${d.movimiento || "—"}</p></div>
+      </div>
+      <label class="form-label">Texto del Proveído</label>
+      <div class="proveido-box">${d.textoProveido || "No se encontró texto del proveído."}</div>
+    `;
+    setStep(4);
+
+  } catch(e) {
+    content.innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`;
+  }
+}
+
+// ── GUARDAR PROVEIDO ──
+async function guardarProveido() {
+  if (!pendingProveido) return;
+
+  const { error } = await db.from("movimientos").insert({
+    user_id: currentUser.id,
+    parte_actora: pendingProveido.parteActora,
+    demandado: pendingProveido.demandado,
+    jurisdiccion: pendingProveido.jurisdiccion,
+    juzgado: pendingProveido.juzgado,
+    expediente: pendingProveido.expediente,
+    movimiento: pendingProveido.movimiento,
+    texto_proveido: pendingProveido.textoProveido,
+  });
+
+  if (error) return showAlert("Error al guardar: " + error.message);
+  showAlert("✅ Proveído guardado correctamente.", "success");
+  pendingProveido = null;
+}
+
+// ── RESET SEARCH ──
+function resetSearch() {
+  document.getElementById("input-caratula").value = "";
+  document.getElementById("resultados-busqueda").innerHTML = "";
+  document.getElementById("card-step3").style.display = "none";
+  pendingProveido = null;
+  setStep(2);
+}
+
+// ── LOAD HISTORIAL ──
+async function loadHistorial() {
+  const { data, error } = await db
+    .from("movimientos")
+    .select("*")
+    .eq("user_id", currentUser?.id)
+    .order("created_at", { ascending: false });
+
+  if (error || !data) return;
+
+  const tbody = document.getElementById("historial-body");
+  if (!data.length) {
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="empty-state-icon">📂</div><p>No hay expedientes guardados todavía</p></div></td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = data.map(r => `
+    <tr>
+      <td class="td-main">${r.parte_actora || "—"}</td>
+      <td>${r.demandado || "—"}</td>
+      <td>${r.jurisdiccion || "—"}</td>
+      <td>${r.juzgado || "—"}</td>
+      <td>${r.expediente || "—"}</td>
+      <td>${r.movimiento || "—"}</td>
+      <td>
+        <button class="btn btn-sm btn-outline" onclick="verTexto('${encodeURIComponent(r.texto_proveido || '')}')">Ver</button>
+        <button class="btn btn-sm btn-danger" onclick="eliminarMovimiento('${r.id}')">🗑</button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+function verTexto(encoded) {
+  document.getElementById("modal-proveido-text").textContent = decodeURIComponent(encoded);
+  document.getElementById("modal-proveido").style.display = "flex";
+}
+
+async function eliminarMovimiento(id) {
+  if (!confirm("¿Eliminar este registro?")) return;
+  await db.from("movimientos").delete().eq("id", id);
+  await loadHistorial();
+}
+
+// ── EXPORTAR EXCEL ──
+async function exportarExcel() {
+  const { data } = await db.from("movimientos").select("*").eq("user_id", currentUser.id).order("created_at", { ascending: false });
+  if (!data?.length) return showAlert("No hay expedientes para exportar.", "warning");
+
+  const rows = data.map(r => ({
+    parteActora: r.parte_actora,
+    demandado: r.demandado,
+    jurisdiccion: r.jurisdiccion,
+    juzgado: r.juzgado,
+    expediente: r.expediente,
+    movimiento: r.movimiento,
+    textoProveido: r.texto_proveido,
+  }));
+
+  exportToExcel(rows, "ProvidAI_Expedientes");
+  showAlert("✅ Excel descargado correctamente.", "success");
+}
+
+// ── GUARDAR CREDENCIALES MEV ──
+async function guardarCredenciales() {
+  const user = document.getElementById("cred-user").value.trim();
+  const pass = document.getElementById("cred-pass").value;
+  if (!user || !pass) return showAlert("Completá usuario y contraseña MEV.", "error", "cred-alert");
+
+  // Test login before saving
+  showAlert("Verificando credenciales en MEV...", "info", "cred-alert");
+  const res = await mevLogin(user, pass, "0").catch(() => null);
+
+  if (!res?.success) {
+    showAlert("❌ Las credenciales MEV son incorrectas. Verificalas.", "error", "cred-alert");
+    return;
+  }
+
+  const { error } = await db.from("profiles").update({
+    mev_username: user,
+    mev_password: pass,
+  }).eq("id", currentUser.id);
+
+  if (error) return showAlert("Error al guardar: " + error.message, "error", "cred-alert");
+  showAlert("✅ Credenciales guardadas correctamente.", "success", "cred-alert");
+}
+</script>
+</body>
+</html>

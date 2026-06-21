@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProvidAI — Cuenta Pendiente</title>
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<div class="pending-page">
+  <div class="pending-card">
+    <div class="pending-icon">⏳</div>
+    <h2 style="margin-bottom:0.5rem;">Cuenta pendiente de aprobación</h2>
+    <div class="gold-rule" style="margin:0.75rem auto 1rem;"></div>
+    <p style="color:var(--gray-500); font-size:0.92rem; line-height:1.7;">
+      Tu solicitud de acceso fue recibida. Un administrador revisará tu cuenta y te enviaremos un correo electrónico cuando sea aprobada.
+    </p>
+    <p style="color:var(--gray-500); font-size:0.85rem; margin-top:1rem;">
+      Si tenés alguna consulta, contactá al administrador del sistema.
+    </p>
+    <button class="btn btn-outline" onclick="handleLogout()" style="margin-top:2rem; width:100%;">
+      Cerrar Sesión
+    </button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/auth.js"></script>
+<script>
+(async () => {
+  const user = await getCurrentUser();
+  if (!user) window.location.href = "/index.html";
+  else {
+    const profile = await getUserProfile(user.id).catch(() => null);
+    if (profile?.approved) window.location.href = "/dashboard.html";
+  }
+})();
+
+async function handleLogout() {
+  await signOut();
+}
+</script>
+</body>
+</html>

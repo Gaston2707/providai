@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProvidAI — Panel Admin</title>
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+  <a href="/admin.html" class="logo">
+    <div class="logo-icon">⚖️</div>
+    <div>
+      <span class="logo-text">Provid<span>AI</span></span>
+      <span class="logo-tagline">Panel de Administración</span>
+    </div>
+  </a>
+  <div class="navbar-right">
+    <span class="navbar-user" id="admin-name">Admin</span>
+    <button class="btn-logout" onclick="signOut()">Cerrar sesión</button>
+  </div>
+</nav>
+
+<div class="dashboard-layout">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Administración</div>
+      <a class="sidebar-item active" onclick="showSection('usuarios')">
+        <span class="sidebar-icon">👥</span> Usuarios
+      </a>
+      <a class="sidebar-item" onclick="showSection('pendientes')">
+        <span class="sidebar-icon">⏳</span> Pendientes
+        <span id="badge-pendientes" style="margin-left:auto; background:var(--gold); color:var(--navy); border-radius:10px; padding:1px 7px; font-size:0.72rem; font-weight:700;"></span>
+      </a>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main-content">
+
+    <div id="global-alert" style="display:none;" class="alert"></div>
+
+    <!-- STATS -->
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon">👥</div>
+        <div class="stat-value" id="stat-total">—</div>
+        <div class="stat-label">Usuarios totales</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">✅</div>
+        <div class="stat-value" id="stat-aprobados">—</div>
+        <div class="stat-label">Aprobados</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">⏳</div>
+        <div class="stat-value" id="stat-pendientes">—</div>
+        <div class="stat-label">Pendientes</div>
+      </div>
+    </div>
+
+    <!-- ═══ SECTION: USUARIOS ═══ -->
+    <section id="section-usuarios">
+      <div class="page-header">
+        <h2>Todos los Usuarios</h2>
+        <p>Gestión de abogados registrados en ProvidAI</p>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Email</th>
+                <th>Estado</th>
+                <th>Rol</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="usuarios-body">
+              <tr><td colspan="5"><div class="empty-state"><div class="empty-state-icon">👥</div><p>Cargando usuarios...</p></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ SECTION: PENDIENTES ═══ -->
+    <section id="section-pendientes" style="display:none;">
+      <div class="page-header">
+        <h2>Solicitudes Pendientes</h2>
+        <p>Abogados que esperan aprobación de acceso</p>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Email</th>
+                <th>Fecha solicitud</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="pendientes-body">
+              <tr><td colspan="4"><div class="empty-state"><div class="empty-state-icon">⏳</div><p>No hay solicitudes pendientes</p></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- MODAL CONFIRMAR ACCION -->
+<div class="modal-overlay" id="modal-confirm" style="display:none;">
+  <div class="modal">
+    <h3 id="modal-title">Confirmar acción</h3>
+    <div class="gold-rule"></div>
+    <p id="modal-body" style="color:var(--gray-500); font-size:0.92rem;"></p>
+    <div class="modal-actions">
+      <button class="btn btn-outline btn-sm" onclick="document.getElementById('modal-confirm').style.display='none'">Cancelar</button>
+      <button class="btn btn-primary btn-sm" id="modal-confirm-btn">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/auth.js"></script>
+<script>
+let adminUser = null;
+let allUsers = [];
+
+// ── INIT ──
+(async () => {
+  const result = await requireAdmin();
+  if (!result) return;
+  adminUser = result.user;
+  document.getElementById("admin-name").textContent = result.profile.full_name || result.user.email;
+  await loadAll();
+})();
+
+// ── LOAD ALL DATA ──
+async function loadAll() {
+  const { data, error } = await db.from("profiles").select("*").order("created_at", { ascending: false });
+  if (error || !data) return;
+
+  allUsers = data.filter(u => u.role !== "admin");
+  const pendientes = allUsers.filter(u => !u.approved);
+  const aprobados = allUsers.filter(u => u.approved);
+
+  // Stats
+  document.getElementById("stat-total").textContent = allUsers.length;
+  document.getElementById("stat-aprobados").textContent = aprobados.length;
+  document.getElementById("stat-pendientes").textContent = pendientes.length;
+
+  // Badge pendientes
+  const badge = document.getElementById("badge-pendientes");
+  badge.textContent = pendientes.length > 0 ? pendientes.length : "";
+
+  renderUsuarios(allUsers);
+  renderPendientes(pendientes);
+}
+
+// ── RENDER USUARIOS ──
+function renderUsuarios(users) {
+  const tbody = document.getElementById("usuarios-body");
+  if (!users.length) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-state-icon">👥</div><p>No hay usuarios registrados</p></div></td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = users.map(u => `
+    <tr>
+      <td class="td-main">${u.full_name || "—"}</td>
+      <td>${u.email}</td>
+      <td>
+        <span class="badge ${u.approved ? 'badge-approved' : 'badge-pending'}">
+          ${u.approved ? "✅ Aprobado" : "⏳ Pendiente"}
+        </span>
+      </td>
+      <td><span style="font-size:0.82rem; text-transform:capitalize;">${u.role}</span></td>
+      <td style="display:flex; gap:6px; flex-wrap:wrap;">
+        ${!u.approved
+          ? `<button class="btn btn-sm btn-gold" onclick="aprobarUsuario('${u.id}', '${u.email}', '${escapeJs(u.full_name)}')">✅ Aprobar</button>`
+          : `<button class="btn btn-sm btn-outline" onclick="revocarUsuario('${u.id}', '${u.email}')">🔒 Revocar</button>`
+        }
+        <button class="btn btn-sm btn-danger" onclick="eliminarUsuario('${u.id}', '${u.email}')">🗑</button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+// ── RENDER PENDIENTES ──
+function renderPendientes(users) {
+  const tbody = document.getElementById("pendientes-body");
+  if (!users.length) {
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-state-icon">✅</div><p>No hay solicitudes pendientes</p></div></td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = users.map(u => `
+    <tr>
+      <td class="td-main">${u.full_name || "—"}</td>
+      <td>${u.email}</td>
+      <td style="font-size:0.82rem; color:var(--gray-500);">${new Date(u.created_at).toLocaleDateString('es-AR')}</td>
+      <td style="display:flex; gap:6px;">
+        <button class="btn btn-sm btn-gold" onclick="aprobarUsuario('${u.id}', '${u.email}', '${escapeJs(u.full_name)}')">✅ Aprobar</button>
+        <button class="btn btn-sm btn-danger" onclick="eliminarUsuario('${u.id}', '${u.email}')">❌ Rechazar</button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+// ── APROBAR USUARIO ──
+async function aprobarUsuario(id, email, name) {
+  showConfirm(
+    "Aprobar usuario",
+    `¿Aprobás el acceso de ${name} (${email})?`,
+    async () => {
+      const { error } = await db.from("profiles").update({ approved: true }).eq("id", id);
+      if (error) return showAlert("Error al aprobar: " + error.message);
+
+      // Notificar via función de Netlify (email)
+      await fetch("/.netlify/functions/notify-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, name }),
+      }).catch(() => {}); // No critical if fails
+
+      showAlert(`✅ ${name} fue aprobado/a. Se le enviará una notificación.`, "success");
+      await loadAll();
+    }
+  );
+}
+
+// ── REVOCAR USUARIO ──
+async function revocarUsuario(id, email) {
+  showConfirm(
+    "Revocar acceso",
+    `¿Revocás el acceso de ${email}? El usuario no podrá iniciar sesión.`,
+    async () => {
+      const { error } = await db.from("profiles").update({ approved: false }).eq("id", id);
+      if (error) return showAlert("Error al revocar: " + error.message);
+      showAlert("✅ Acceso revocado.", "success");
+      await loadAll();
+    }
+  );
+}
+
+// ── ELIMINAR USUARIO ──
+async function eliminarUsuario(id, email) {
+  showConfirm(
+    "Eliminar usuario",
+    `¿Eliminás permanentemente a ${email}? Esta acción no se puede deshacer.`,
+    async () => {
+      const { error } = await db.from("profiles").delete().eq("id", id);
+      if (error) return showAlert("Error al eliminar: " + error.message);
+      showAlert("✅ Usuario eliminado.", "success");
+      await loadAll();
+    }
+  );
+}
+
+// ── MODAL CONFIRM ──
+function showConfirm(title, body, onConfirm) {
+  document.getElementById("modal-title").textContent = title;
+  document.getElementById("modal-body").textContent = body;
+  const btn = document.getElementById("modal-confirm-btn");
+  btn.onclick = async () => {
+    document.getElementById("modal-confirm").style.display = "none";
+    await onConfirm();
+  };
+  document.getElementById("modal-confirm").style.display = "flex";
+}
+
+// ── SIDEBAR NAV ──
+function showSection(name) {
+  ["usuarios", "pendientes"].forEach(s => {
+    document.getElementById(`section-${s}`).style.display = "none";
+  });
+  document.querySelectorAll(".sidebar-item").forEach(el => el.classList.remove("active"));
+  document.getElementById(`section-${name}`).style.display = "block";
+  event?.target?.closest(".sidebar-item")?.classList.add("active");
+}
+
+// ── ALERT ──
+function showAlert(msg, type = "error") {
+  const el = document.getElementById("global-alert");
+  el.className = `alert alert-${type}`;
+  el.textContent = msg;
+  el.style.display = "flex";
+  setTimeout(() => el.style.display = "none", 6000);
+}
+
+function escapeJs(str) {
+  return (str || "").replace(/'/g, "\\'").replace(/"/g, '\\"');
+}
+</script>
+</body>
+</html>
