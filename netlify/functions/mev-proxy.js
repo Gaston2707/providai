@@ -76,12 +76,11 @@ exports.handler = async (event) => {
       const loginPage = await makeRequest(`${MEV_BASE}/loguin.asp`, { method: "GET" });
       let cookies = extractCookies(loginPage.headers);
 
-      // Step 2: POST credentials
+      // Step 2: POST credentials con parametros reales de MEV
       const postData = querystring.stringify({
-        LS_USUARIO: username,
-        LS_PASSWORD: password,
-        LS_DEPTO: "0",
-        LS_SUBMIT: "Ingresar",
+        usuario: username,
+        clave: password,
+        DeptoRegistrado: "aa",
       });
 
       const loginRes = await makeRequest(`${MEV_BASE}/loguin.asp`, {
@@ -103,15 +102,17 @@ exports.handler = async (event) => {
         const moreCookies = extractCookies(redirectRes.headers);
         cookies = mergeCookies(cookies, moreCookies);
         
-        const success = !redirectRes.body.includes("no es un usuario") && 
-                        !redirectRes.body.includes("Usuario o clave no válido") &&
-                        redirectRes.status === 200;
+        const success = redirectRes.body.includes("POSLoguin.asp") || 
+                        redirectRes.body.includes("UsuarioMEV") ||
+                        redirectRes.body.includes("Seleccione el Organismo") ||
+                        (!redirectRes.body.includes("no es un usuario") && redirectRes.status === 200);
         return { statusCode: 200, headers, body: JSON.stringify({ success, cookies }) };
       }
 
-      const success = !loginRes.body.includes("no es un usuario") && 
-                      !loginRes.body.includes("Usuario o clave no válido") &&
-                      (loginRes.status === 302 || cookies.length > 10);
+      const success = loginRes.body.includes("POSLoguin.asp") ||
+                      loginRes.body.includes("UsuarioMEV") ||
+                      loginRes.body.includes("Seleccione el Organismo") ||
+                      (!loginRes.body.includes("no es un usuario") && loginRes.status === 302);
 
       return { statusCode: 200, headers, body: JSON.stringify({ success, cookies }) };
     }
