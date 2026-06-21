@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ProvidAI ⚖️
 ### Tu proveído, siempre a mano
 
@@ -83,3 +84,7 @@ providai/
 - El proxy MEV funciona como Netlify Function (serverless)
 - El scraping puede requerir ajustes según la estructura actual de MEV
 - Puede haber una fase de debugging del scraping una vez que tengas credenciales MEV reales para probar
+=======
+# providai
+App de gestión de expedientes judiciales
+>>>>>>> 790a00705cab50a193f3e7ffe39470454e6f68f8
