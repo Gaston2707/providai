@@ -36,12 +36,13 @@ async function requireAuth() {
   return user;
 }
 
-// ── GUARD: require approved ──
+// ── GUARD: require approved (admin also allowed) ──
 async function requireApproved() {
   const user = await requireAuth();
   if (!user) return null;
   const profile = await getUserProfile(user.id);
-  if (!profile.approved) {
+  // Admin puede acceder al dashboard también
+  if (!profile.approved && profile.role !== "admin") {
     window.location.href = "/pending.html";
     return null;
   }
