@@ -30,7 +30,7 @@ function makeRequest(url, options = {}, postData = null) {
       res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
     });
     req.on("error", reject);
-    req.setTimeout(20000, () => { req.destroy(); reject(new Error("Timeout")); });
+    req.setTimeout(25000, () => { req.destroy(); reject(new Error("Timeout")); });
     if (postData) req.write(postData);
     req.end();
   });
@@ -44,18 +44,88 @@ function extractCookies(headers) {
 
 function mergeCookies(existing, newCookies) {
   if (!existing && !newCookies) return "";
-  if (!existing) return newCookies;
-  if (!newCookies) return existing;
+  if (!existing) return newCookies || "";
+  if (!newCookies) return existing || "";
   const map = {};
   [...existing.split("; "), ...newCookies.split("; ")].forEach(c => {
-    const [k, ...rest] = c.split("=");
-    if (k && rest.length) map[k.trim()] = rest.join("=").trim();
+    const idx = c.indexOf("=");
+    if (idx > 0) {
+      const k = c.substring(0, idx).trim();
+      const v = c.substring(idx + 1).trim();
+      if (k) map[k] = v;
+    }
   });
   return Object.entries(map).map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
 function getText(html) {
-  return (html || "").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+  return (html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\r\n/g, "\n")
+    .replace(/\s*\n\s*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+async function doLogin(username, password, depto) {
+  // PASO 1: GET login
+  const step1 = await makeRequest(`${MEV_BASE}/loguin.asp`, { method: "GET" });
+  let cookies = extractCookies(step1.headers);
+
+  // PASO 2: POST credenciales
+  const loginData = querystring.stringify({
+    usuario: username,
+    clave: password,
+    DeptoRegistrado: "aa",
+  });
+  const step2 = await makeRequest(`${MEV_BASE}/loguin.asp`, {
+    method: "POST",
+    headers: { Cookie: cookies, Referer: `${MEV_BASE}/loguin.asp` },
+  }, loginData);
+  cookies = mergeCookies(cookies, extractCookies(step2.headers));
+
+  if (step2.body.includes("clave incorrecta") || step2.body.includes("no es un usuario")) {
+    return { success: false, cookies: "" };
+  }
+
+  // Seguir redirect
+  if (step2.status === 302) {
+    const loc = step2.headers["location"] || "";
+    const url = loc.startsWith("http") ? loc : `${MEV_BASE}/${loc.replace(/^\//, "")}`;
+    const r = await makeRequest(url, { headers: { Cookie: cookies } });
+    cookies = mergeCookies(cookies, extractCookies(r.headers));
+  }
+
+  // PASO 3: POST departamento → POSLoguin.asp
+  const deptoData = querystring.stringify({
+    TipoDto: "CC",
+    DtoJudElegido: depto || "80",
+    Aceptar: "Aceptar",
+  });
+  const step3 = await makeRequest(`${MEV_BASE}/POSLoguin.asp`, {
+    method: "POST",
+    headers: { Cookie: cookies, Referer: `${MEV_BASE}/loguin.asp` },
+  }, deptoData);
+  cookies = mergeCookies(cookies, extractCookies(step3.headers));
+
+  // Seguir redirect a MuestraCausas
+  const loc3 = step3.headers["location"] || "";
+  const muestraUrl = loc3
+    ? (loc3.startsWith("http") ? loc3 : `${MEV_BASE}/${loc3.replace(/^\//, "")}`)
+    : `${MEV_BASE}/MuestraCausas.asp?radio=xCa&pOrden=xCa&pOrdenAD=Asc`;
+
+  const step3b = await makeRequest(muestraUrl, {
+    headers: { Cookie: cookies, Referer: `${MEV_BASE}/POSLoguin.asp` }
+  });
+  cookies = mergeCookies(cookies, extractCookies(step3b.headers));
+
+  return { success: true, cookies, muestraHtml: step3b.body };
 }
 
 exports.handler = async (event) => {
@@ -70,347 +140,31 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || "{}");
-    const { action, username, password, sessionCookie, depto, caratula, expedienteUrl } = body;
+    const { action, username, password, depto, caratula, expedienteUrl } = body;
 
     // ══════════════════════════════════════════
-    // ACTION: LOGIN (3 pasos reales de MEV)
+    // ACTION: LOGIN (verificar credenciales)
     // ══════════════════════════════════════════
     if (action === "login") {
-      // PASO 1: GET página login → obtener cookie inicial
-      const step1 = await makeRequest(`${MEV_BASE}/loguin.asp`, { method: "GET" });
-      let cookies = extractCookies(step1.headers);
-
-      // PASO 2: POST credenciales → loguin.asp
-      const loginData = querystring.stringify({
-        usuario: username,
-        clave: password,
-        DeptoRegistrado: "aa",
-      });
-      const step2 = await makeRequest(`${MEV_BASE}/loguin.asp`, {
-        method: "POST",
-        headers: { Cookie: cookies, Referer: `${MEV_BASE}/loguin.asp` },
-      }, loginData);
-
-      cookies = mergeCookies(cookies, extractCookies(step2.headers));
-
-      // Verificar si el login fue exitoso
-      const loginFailed = step2.body.includes("clave incorrecta") ||
-                          step2.body.includes("no es un usuario") ||
-                          step2.body.includes("Usuario o clave");
-
-      if (loginFailed) {
-        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ success: false, cookies: "" }) };
-      }
-
-      // Seguir redirect si hay
-      let mainHtml = step2.body;
-      if (step2.status === 302) {
-        const loc = step2.headers["location"] || "";
-        const redirectUrl = loc.startsWith("http") ? loc : `${MEV_BASE}/${loc.replace(/^\//, "")}`;
-        const step2b = await makeRequest(redirectUrl, { headers: { Cookie: cookies } });
-        cookies = mergeCookies(cookies, extractCookies(step2b.headers));
-        mainHtml = step2b.body;
-      }
-
-      // PASO 3: POST departamento → POSLoguin.asp
-      const deptoData = querystring.stringify({
-        TipoDto: "CC",
-        DtoJudElegido: depto || "80",
-        Aceptar: "Aceptar",
-      });
-      const step3 = await makeRequest(`${MEV_BASE}/POSLoguin.asp`, {
-        method: "POST",
-        headers: { Cookie: cookies, Referer: `${MEV_BASE}/loguin.asp` },
-      }, deptoData);
-
-      cookies = mergeCookies(cookies, extractCookies(step3.headers));
-
-      // Seguir redirect a MuestraCausas.asp
-      let muestraHtml = step3.body;
-      if (step3.status === 302) {
-        const loc = step3.headers["location"] || "MuestraCausas.asp?radio=xCa&pOrden=xCa&pOrdenAD=Asc";
-        const redirectUrl = loc.startsWith("http") ? loc : `${MEV_BASE}/${loc.replace(/^\//, "")}`;
-        const step3b = await makeRequest(redirectUrl, { headers: { Cookie: cookies, Referer: `${MEV_BASE}/POSLoguin.asp` } });
-        cookies = mergeCookies(cookies, extractCookies(step3b.headers));
-        muestraHtml = step3b.body;
-      } else {
-        // Si no hubo redirect, ir directamente a MuestraCausas
-        const step3b = await makeRequest(`${MEV_BASE}/MuestraCausas.asp?radio=xCa&pOrden=xCa&pOrdenAD=Asc`, {
-          headers: { Cookie: cookies, Referer: `${MEV_BASE}/POSLoguin.asp` }
-        });
-        cookies = mergeCookies(cookies, extractCookies(step3b.headers));
-        muestraHtml = step3b.body;
-      }
-
-      // Extraer JuzgadoElegido del HTML de MuestraCausas
-      const juzgadoMatch = muestraHtml.match(/name="JuzgadoElegido"[^>]*value="([^"]+)"/i) ||
-                           muestraHtml.match(/JuzgadoElegido[^>]*value="([^"]+)"/i) ||
-                           muestraHtml.match(/value="([A-Z]{2,4}\d+)"/);
-      const juzgadoElegido = juzgadoMatch ? juzgadoMatch[1] : "";
-
-      // Extraer Set del HTML
-      const setMatch = muestraHtml.match(/name="Set"[^>]*value="(\d+)"/i) ||
-                       muestraHtml.match(/<option[^>]*value="(\d+)"[^>]*selected/i);
-      const setId = setMatch ? setMatch[1] : "";
-
-      const success = muestraHtml.includes("MuestraCausas") || 
-                      muestraHtml.includes("UsuarioMEV") ||
-                      muestraHtml.includes("Buscar") ||
-                      cookies.length > 10;
-
+      const result = await doLogin(username, password, depto || "80");
       return {
         statusCode: 200, headers: corsHeaders,
-        body: JSON.stringify({ success, cookies, juzgadoElegido, setId }),
+        body: JSON.stringify({ success: result.success, cookies: result.cookies }),
       };
     }
 
     // ══════════════════════════════════════════
-    // ACTION: BUSCAR
+    // ACTION: BUSCAR (login + buscar en uno)
     // ══════════════════════════════════════════
     if (action === "buscar") {
-      const { juzgadoElegido, setId } = body;
-
-      const today = new Date();
-      const dateStr = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`;
-
-      // Primero GET MuestraCausas para obtener JuzgadoElegido y Set reales
-      const muestraRes = await makeRequest(`${MEV_BASE}/MuestraCausas.asp?radio=xCa&pOrden=xCa&pOrdenAD=Asc`, {
-        headers: { Cookie: sessionCookie, Referer: `${MEV_BASE}/POSLoguin.asp` },
-      });
-      const muestraHtml = muestraRes.body;
-      
-      // Extraer JuzgadoElegido del select
-      const juzMatch = muestraHtml.match(/name="JuzgadoElegido"[^>]*value="([^"]+)"/i) ||
-                       muestraHtml.match(/id="JuzgadoElegido"[^>]*value="([^"]+)"/i) ||
-                       muestraHtml.match(/<option[^>]*selected[^>]*value="([A-Z]{2,4}\d+)"/i) ||
-                       muestraHtml.match(/value="([A-Z]{2,4}\d{3,})"/);
-      const realJuzgado = juzMatch ? juzMatch[1] : (juzgadoElegido || "");
-      
-      // Extraer Set
-      const setMatch = muestraHtml.match(/name="Set"[^>]*value="(\d+)"/i) ||
-                       muestraHtml.match(/id="Set"[^>]*value="(\d+)"/i) ||
-                       muestraHtml.match(/<option[^>]*value="(\d{5,})"/i);
-      const realSet = setMatch ? setMatch[1] : (setId || "");
-
-      const searchData = querystring.stringify({
-        OpcionBusqueda: "0",
-        busca: caratula,
-        JuzgadoElegido: realJuzgado,
-        radio: "xCa",
-        caratula: caratula,
-        NCausa: "",
-        NInterno: "",
-        Set: realSet,
-        Desde: "01/01/2020",
-        Hasta: dateStr,
-        SetNovedades: "",
-        TipoCausa: "Am",
-        Buscar: "Buscar",
-      });
-
-      const searchRes = await makeRequest(`${MEV_BASE}/Busqueda.asp`, {
-        method: "POST",
-        headers: {
-          Cookie: sessionCookie,
-          Referer: `${MEV_BASE}/MuestraCausas.asp`,
-        },
-      }, searchData);
-
-      let resultHtml = searchRes.body;
-      let resultCookies = mergeCookies(sessionCookie, extractCookies(searchRes.headers));
-
-      if (searchRes.status === 302) {
-        const loc = searchRes.headers["location"] || "";
-        const resultUrl = loc.startsWith("http") ? loc : `${MEV_BASE}/${loc.replace(/^\//, "")}`;
-        const resultRes = await makeRequest(resultUrl, {
-          headers: { Cookie: resultCookies, Referer: `${MEV_BASE}/Busqueda.asp` },
-        });
-        resultHtml = resultRes.body;
-        resultCookies = mergeCookies(resultCookies, extractCookies(resultRes.headers));
+      // Login completo
+      const loginResult = await doLogin(username, password, depto);
+      if (!loginResult.success) {
+        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ success: false, error: "Login fallido" }) };
       }
+      let cookies = loginResult.cookies;
 
-      // Parsear expedientes
-      const expedientes = [];
-      const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-      let rowMatch;
-
-      while ((rowMatch = rowRegex.exec(resultHtml)) !== null) {
-        const row = rowMatch[1];
-        const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
-        const link = row.match(/href="([^"]+)"/i);
-
-        if (cells.length >= 3 && link) {
-          const caratulaText = getText(cells[0]?.[1] || "");
-          if (caratulaText.length > 5 && caratulaText.includes("/")) {
-            const href = link[1];
-            const fullUrl = href.startsWith("http") ? href : `${MEV_BASE}/${href.replace(/^\//, "")}`;
-            expedientes.push({
-              caratula: caratulaText,
-              organismo: getText(cells[1]?.[1] || ""),
-              expediente: getText(cells[2]?.[1] || ""),
-              fecha: getText(cells[3]?.[1] || ""),
-              ultimo: getText(cells[4]?.[1] || ""),
-              url: fullUrl,
-            });
-          }
-        }
-      }
-
-      return {
-        statusCode: 200, headers: corsHeaders,
-        body: JSON.stringify({
-          success: true,
-          expedientes,
-          cookies: resultCookies,
-          muestraStatus: muestraRes.status,
-          muestraIsLogin: muestraHtml.includes("DeptoRegistrado"),
-          realJuzgado,
-          realSet,
-          raw: resultHtml.substring(0, 2000),
-        }),
-      };
-    }
-
-    // ══════════════════════════════════════════
-    // ACTION: GET PROVEIDO
-    // ══════════════════════════════════════════
-    if (action === "get_proveido") {
-      const res = await makeRequest(expedienteUrl, {
-        headers: { Cookie: sessionCookie, Referer: `${MEV_BASE}/MuestraCausas.asp` },
-      });
-
-      const html = res.body;
-
-      // Extraer carátula
-      const caratulaMatch = html.match(/Car[áa]tula:\s*<\/[^>]+>\s*([^<]+)/i) ||
-                            html.match(/Car[áa]tula[^<]*<[^>]+>\s*([^<]+)/i);
-      const caratulaFull = caratulaMatch ? caratulaMatch[1].trim() : "";
-      const partes = caratulaFull.split(/\s+C\/\s+/i);
-      const parteActora = partes[0]?.trim() || "";
-      const demandado = partes.slice(1).join(" C/ ").replace(/\s+S\/.*$/i, "").trim() || "";
-
-      // Extraer expediente
-      const expMatch = html.match(/N[°º]\s*de\s*Expediente[^<]*<[^>]+>\s*([^<]+)/i) ||
-                       html.match(/Expediente:\s*<[^>]+>\s*([^<]+)/i);
-      const numExpediente = expMatch ? expMatch[1].trim() : "";
-
-      // Extraer juzgado
-      const juzgadoMatch = html.match(/CAMARA[^<]*/i) || html.match(/JUZGADO[^<]*/i);
-      const juzgado = juzgadoMatch ? juzgadoMatch[0].trim() : "";
-
-      // Buscar tabla de Pasos Procesales - el PRIMERO es el más nuevo
-      let ultimoMovimiento = "";
-      let ultimoTexto = "";
-      let ultimaFecha = "";
-
-      // Buscar el ícono de lapicito (firmado) = tiene proveído
-      // El primer row con clase o con fecha es el último movimiento
-      const pasosMatch = html.match(/Pasos Procesales[\s\S]*?<\/table>/i);
-      if (pasosMatch) {
-        const rows = [...pasosMatch[0].matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
-        for (const row of rows) {
-          const cells = [...row[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
-          if (cells.length >= 2) {
-            const fecha = getText(cells[0]?.[1] || "");
-            const desc = getText(cells[3]?.[1] || cells[2]?.[1] || cells[1]?.[1] || "");
-            if (fecha.match(/\d{2}\/\d{2}\/\d{4}/)) {
-              ultimaFecha = fecha;
-              ultimoMovimiento = desc;
-              // Buscar link al proveído en esta fila
-              const linkMatch = row[0].match(/href="([^"]*proveido[^"]*)"/i);
-              if (linkMatch) {
-                const provUrl = linkMatch[1].startsWith("http") ? linkMatch[1] : `${MEV_BASE}/${linkMatch[1].replace(/^\//, "")}`;
-                const provRes = await makeRequest(provUrl, {
-                  headers: { Cookie: sessionCookie, Referer: expedienteUrl }
-                });
-                // Extraer texto del proveído
-                const textMatch = provRes.body.match(/Para copiar[\s\S]*?desde aqu[íi][^-]*-+([\s\S]*?)-+[\s\S]*?Para copiar[\s\S]*?hasta aqu[íi]/i);
-                if (textMatch) ultimoTexto = getText(textMatch[1]);
-                else ultimoTexto = getText(provRes.body.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, ""));
-              }
-              break;
-            }
-          }
-        }
-      }
-
-      return {
-        statusCode: 200, headers: corsHeaders,
-        body: JSON.stringify({
-          success: true,
-          data: {
-            parteActora,
-            demandado,
-            jurisdiccion: body.depto || "",
-            juzgado,
-            expediente: numExpediente,
-            movimiento: ultimoMovimiento,
-            textoProveido: ultimoTexto,
-            fecha: ultimaFecha,
-          },
-          raw: html.substring(0, 3000),
-        }),
-      };
-    }
-
-        // ══════════════════════════════════════════
-    // ACTION: LOGIN + BUSCAR (todo en uno)
-    // ══════════════════════════════════════════
-    if (action === "login_y_buscar") {
-      const { username, password, depto, caratula } = body;
-
-      // PASO 1: GET login page
-      const step1 = await makeRequest(`${MEV_BASE}/loguin.asp`, { method: "GET" });
-      let cookies = extractCookies(step1.headers);
-
-      // PASO 2: POST credenciales
-      const loginData = querystring.stringify({
-        usuario: username,
-        clave: password,
-        DeptoRegistrado: "aa",
-      });
-      const step2 = await makeRequest(`${MEV_BASE}/loguin.asp`, {
-        method: "POST",
-        headers: { Cookie: cookies, Referer: `${MEV_BASE}/loguin.asp` },
-      }, loginData);
-      cookies = mergeCookies(cookies, extractCookies(step2.headers));
-
-      if (step2.body.includes("clave incorrecta") || step2.body.includes("no es un usuario")) {
-        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ success: false, error: "Credenciales incorrectas" }) };
-      }
-
-      // Seguir redirect si hay
-      if (step2.status === 302) {
-        const loc = step2.headers["location"] || "";
-        const url = loc.startsWith("http") ? loc : `${MEV_BASE}/${loc.replace(/^\//, "")}`;
-        const r = await makeRequest(url, { headers: { Cookie: cookies } });
-        cookies = mergeCookies(cookies, extractCookies(r.headers));
-      }
-
-      // PASO 3: POST departamento
-      const deptoData = querystring.stringify({
-        TipoDto: "CC",
-        DtoJudElegido: depto || "80",
-        Aceptar: "Aceptar",
-      });
-      const step3 = await makeRequest(`${MEV_BASE}/POSLoguin.asp`, {
-        method: "POST",
-        headers: { Cookie: cookies, Referer: `${MEV_BASE}/loguin.asp` },
-      }, deptoData);
-      cookies = mergeCookies(cookies, extractCookies(step3.headers));
-
-      // Seguir redirect a MuestraCausas
-      let muestraHtml = step3.body;
-      const loc3 = step3.headers["location"] || "";
-      const muestraUrl = loc3 ? (loc3.startsWith("http") ? loc3 : `${MEV_BASE}/${loc3.replace(/^\//, "")}`) 
-                               : `${MEV_BASE}/MuestraCausas.asp?radio=xCa&pOrden=xCa&pOrdenAD=Asc`;
-      const step3b = await makeRequest(muestraUrl, {
-        headers: { Cookie: cookies, Referer: `${MEV_BASE}/POSLoguin.asp` }
-      });
-      cookies = mergeCookies(cookies, extractCookies(step3b.headers));
-      muestraHtml = step3b.body;
-
-      // PASO 4: POST búsqueda
+      // POST búsqueda
       const today = new Date();
       const dateStr = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`;
 
@@ -430,35 +184,35 @@ exports.handler = async (event) => {
         Buscar: "Buscar",
       });
 
-      const step4 = await makeRequest(`${MEV_BASE}/Busqueda.asp`, {
+      const searchRes = await makeRequest(`${MEV_BASE}/Busqueda.asp`, {
         method: "POST",
-        headers: { Cookie: cookies, Referer: muestraUrl },
+        headers: { Cookie: cookies, Referer: `${MEV_BASE}/MuestraCausas.asp` },
       }, searchData);
-      cookies = mergeCookies(cookies, extractCookies(step4.headers));
+      cookies = mergeCookies(cookies, extractCookies(searchRes.headers));
 
       // Seguir redirect a resultados
-      let resultHtml = step4.body;
-      if (step4.status === 302) {
-        const loc4 = step4.headers["location"] || "";
-        const resultUrl = loc4.startsWith("http") ? loc4 : `${MEV_BASE}/${loc4.replace(/^\//, "")}`;
-        const step4b = await makeRequest(resultUrl, {
+      let resultHtml = searchRes.body;
+      if (searchRes.status === 302) {
+        const loc = searchRes.headers["location"] || "";
+        const resultUrl = loc.startsWith("http") ? loc : `${MEV_BASE}/${loc.replace(/^\//, "")}`;
+        const resultRes = await makeRequest(resultUrl, {
           headers: { Cookie: cookies, Referer: `${MEV_BASE}/Busqueda.asp` }
         });
-        cookies = mergeCookies(cookies, extractCookies(step4b.headers));
-        resultHtml = step4b.body;
+        cookies = mergeCookies(cookies, extractCookies(resultRes.headers));
+        resultHtml = resultRes.body;
       }
 
-      // Parsear expedientes
+      // Parsear expedientes de la tabla de resultados
       const expedientes = [];
-      const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-      let rowMatch;
-      while ((rowMatch = rowRegex.exec(resultHtml)) !== null) {
-        const row = rowMatch[1];
-        const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
-        const link = row.match(/href="([^"]+)"/i);
-        if (cells.length >= 3 && link) {
+      const rows = [...resultHtml.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
+      for (const row of rows) {
+        const cells = [...row[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+        const link = row[0].match(/href="([^"]*procesales[^"]*)"/i) ||
+                     row[0].match(/href="([^"]*nidCausa[^"]*)"/i) ||
+                     row[0].match(/href="([^"]+\.asp[^"]*)"/i);
+        if (cells.length >= 2 && link) {
           const caratulaText = getText(cells[0]?.[1] || "");
-          if (caratulaText.length > 5 && caratulaText.includes("/")) {
+          if (caratulaText.length > 5 && (caratulaText.includes("/") || caratulaText.includes("c."))) {
             const href = link[1];
             const fullUrl = href.startsWith("http") ? href : `${MEV_BASE}/${href.replace(/^\//, "")}`;
             expedientes.push({
@@ -466,7 +220,6 @@ exports.handler = async (event) => {
               organismo: getText(cells[1]?.[1] || ""),
               expediente: getText(cells[2]?.[1] || ""),
               fecha: getText(cells[3]?.[1] || ""),
-              ultimo: getText(cells[4]?.[1] || ""),
               url: fullUrl,
             });
           }
@@ -479,7 +232,104 @@ exports.handler = async (event) => {
           success: true,
           expedientes,
           cookies,
-          raw: resultHtml.substring(0, 1000),
+          isLoginPage: resultHtml.includes("DeptoRegistrado"),
+          raw: resultHtml.substring(0, 500),
+        }),
+      };
+    }
+
+    // ══════════════════════════════════════════
+    // ACTION: GET PROVEIDO (login + ir al proveído)
+    // ══════════════════════════════════════════
+    if (action === "get_proveido") {
+      // Login completo
+      const loginResult = await doLogin(username, password, depto);
+      if (!loginResult.success) {
+        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ success: false, error: "Login fallido" }) };
+      }
+      let cookies = loginResult.cookies;
+
+      // GET página del expediente (procesales.asp)
+      const expRes = await makeRequest(expedienteUrl, {
+        headers: { Cookie: cookies, Referer: `${MEV_BASE}/MuestraCausas.asp` }
+      });
+      cookies = mergeCookies(cookies, extractCookies(expRes.headers));
+      const expHtml = expRes.body;
+
+      // Extraer datos del expediente
+      const caratulaMatch = expHtml.match(/Car[áa]tula[^<]*<[^>]+>\s*([^<]+)/i);
+      const caratulaFull = caratulaMatch ? caratulaMatch[1].trim() : "";
+      const partes = caratulaFull.split(/\s+C\/\s+/i);
+      const parteActora = partes[0]?.trim() || "";
+      const demandadoRaw = partes.slice(1).join(" C/ ") || "";
+      const demandado = demandadoRaw.replace(/\s+S\/.*$/i, "").trim();
+
+      const expNumMatch = expHtml.match(/N[°º]\s*de\s*Expediente[^<]*<[^>]+>\s*([^<]+)/i) ||
+                          expHtml.match(/Expediente[^<]*<[^>]+>\s*([^<]+)/i);
+      const numExpediente = expNumMatch ? expNumMatch[1].trim() : "";
+
+      // Buscar el link al último proveído (primer link con "proveido.asp")
+      const provLinks = [...expHtml.matchAll(/href="([^"]*proveido\.asp[^"]*)"/gi)];
+      
+      let textoProveido = "";
+      let ultimoMovimiento = "";
+      let ultimaFecha = "";
+      let juzgado = "";
+
+      // Extraer juzgado del header
+      const juzgadoMatch = expHtml.match(/CAMARA[^<]{0,100}/i) || expHtml.match(/JUZGADO[^<]{0,100}/i);
+      if (juzgadoMatch) juzgado = juzgadoMatch[0].trim();
+
+      // Extraer último movimiento de la tabla de pasos procesales
+      const rows = [...expHtml.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
+      for (const row of rows) {
+        const cells = [...row[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+        if (cells.length >= 2) {
+          const fecha = getText(cells[0]?.[1] || "");
+          if (fecha.match(/\d{2}\/\d{2}\/\d{4}/)) {
+            ultimaFecha = fecha;
+            ultimoMovimiento = getText(cells[cells.length - 1]?.[1] || "");
+            break;
+          }
+        }
+      }
+
+      // Obtener texto del proveído del primer link encontrado
+      if (provLinks.length > 0) {
+        const provHref = provLinks[0][1];
+        const provUrl = provHref.startsWith("http") ? provHref : `${MEV_BASE}/${provHref.replace(/^\//, "")}`;
+        
+        const provRes = await makeRequest(provUrl, {
+          headers: { Cookie: cookies, Referer: expedienteUrl }
+        });
+
+        // Extraer texto entre las líneas rojas de MEV
+        const provHtml = provRes.body;
+        const textMatch = provHtml.match(/Para copiar y pegar[\s\S]*?desde aqu[íi][^-]*-+([\s\S]*?)-+[\s\S]*?Para copiar y pegar[\s\S]*?hasta aqu[íi]/i);
+        if (textMatch) {
+          textoProveido = getText(textMatch[1]);
+        } else {
+          // Fallback: buscar sección "Texto del Proveido"
+          const secMatch = provHtml.match(/Texto del Prove[íi]do[\s\S]*?<\/table>/i);
+          if (secMatch) textoProveido = getText(secMatch[0]);
+          else textoProveido = getText(provHtml).substring(0, 2000);
+        }
+      }
+
+      return {
+        statusCode: 200, headers: corsHeaders,
+        body: JSON.stringify({
+          success: true,
+          data: {
+            parteActora,
+            demandado,
+            jurisdiccion: depto || "",
+            juzgado,
+            expediente: numExpediente,
+            movimiento: ultimoMovimiento,
+            textoProveido,
+            fecha: ultimaFecha,
+          },
         }),
       };
     }
@@ -487,6 +337,6 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: "Acción no válida" }) };
 
   } catch (err) {
-    return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: err.message }) };
+    return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: err.message, stack: err.stack }) };
   }
 };

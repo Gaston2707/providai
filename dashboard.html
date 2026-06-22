@@ -372,9 +372,9 @@ async function buscarExpedientes() {
   container.innerHTML = '<p style="color:var(--gray-500); font-size:0.88rem; padding:0.5rem 0;">Buscando en MEV...</p>';
 
   try {
-    // Obtener credenciales MEV para hacer login+buscar en una sola llamada
+    // Obtener credenciales MEV
     const { data: profile } = await db.from("profiles").select("mev_username, mev_password").eq("id", currentUser.id).single();
-    const res = await mevRequest("login_y_buscar", {
+    const res = await mevRequest("buscar", {
       username: profile.mev_username,
       password: profile.mev_password,
       depto: currentDepto,
@@ -427,7 +427,13 @@ async function verProveido(encodedUrl, encodedCaratula) {
   card.scrollIntoView({ behavior: "smooth" });
 
   try {
-    const res = await mevGetProveido(url, mevSession, currentDepto, currentOrganismo);
+    const { data: profile2 } = await db.from("profiles").select("mev_username, mev_password").eq("id", currentUser.id).single();
+  const res = await mevRequest("get_proveido", {
+    username: profile2.mev_username,
+    password: profile2.mev_password,
+    depto: currentDepto,
+    expedienteUrl: url,
+  });
 
     if (!res.success) {
       content.innerHTML = '<div class="alert alert-error">No se pudo obtener el proveído.</div>';
@@ -559,7 +565,7 @@ async function guardarCredenciales() {
 
   // Test login before saving
   showAlert("Verificando credenciales en MEV...", "info", "cred-alert");
-  const res = await mevLogin(user, pass, "0").catch(() => null);
+  const res = await mevRequest("login", { username: user, password: pass, depto: "80" }).catch(() => null);
 
   if (!res?.success) {
     showAlert("❌ Las credenciales MEV son incorrectas. Verificalas.", "error", "cred-alert");
