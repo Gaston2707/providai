@@ -262,6 +262,10 @@ exports.handler = async (event) => {
           success: true,
           expedientes,
           cookies: resultCookies,
+          muestraStatus: muestraRes.status,
+          muestraIsLogin: muestraHtml.includes("DeptoRegistrado"),
+          realJuzgado,
+          realSet,
           raw: resultHtml.substring(0, 2000),
         }),
       };
