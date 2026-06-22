@@ -353,6 +353,137 @@ exports.handler = async (event) => {
       };
     }
 
+        // ══════════════════════════════════════════
+    // ACTION: LOGIN + BUSCAR (todo en uno)
+    // ══════════════════════════════════════════
+    if (action === "login_y_buscar") {
+      const { username, password, depto, caratula } = body;
+
+      // PASO 1: GET login page
+      const step1 = await makeRequest(`${MEV_BASE}/loguin.asp`, { method: "GET" });
+      let cookies = extractCookies(step1.headers);
+
+      // PASO 2: POST credenciales
+      const loginData = querystring.stringify({
+        usuario: username,
+        clave: password,
+        DeptoRegistrado: "aa",
+      });
+      const step2 = await makeRequest(`${MEV_BASE}/loguin.asp`, {
+        method: "POST",
+        headers: { Cookie: cookies, Referer: `${MEV_BASE}/loguin.asp` },
+      }, loginData);
+      cookies = mergeCookies(cookies, extractCookies(step2.headers));
+
+      if (step2.body.includes("clave incorrecta") || step2.body.includes("no es un usuario")) {
+        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ success: false, error: "Credenciales incorrectas" }) };
+      }
+
+      // Seguir redirect si hay
+      if (step2.status === 302) {
+        const loc = step2.headers["location"] || "";
+        const url = loc.startsWith("http") ? loc : `${MEV_BASE}/${loc.replace(/^\//, "")}`;
+        const r = await makeRequest(url, { headers: { Cookie: cookies } });
+        cookies = mergeCookies(cookies, extractCookies(r.headers));
+      }
+
+      // PASO 3: POST departamento
+      const deptoData = querystring.stringify({
+        TipoDto: "CC",
+        DtoJudElegido: depto || "80",
+        Aceptar: "Aceptar",
+      });
+      const step3 = await makeRequest(`${MEV_BASE}/POSLoguin.asp`, {
+        method: "POST",
+        headers: { Cookie: cookies, Referer: `${MEV_BASE}/loguin.asp` },
+      }, deptoData);
+      cookies = mergeCookies(cookies, extractCookies(step3.headers));
+
+      // Seguir redirect a MuestraCausas
+      let muestraHtml = step3.body;
+      const loc3 = step3.headers["location"] || "";
+      const muestraUrl = loc3 ? (loc3.startsWith("http") ? loc3 : `${MEV_BASE}/${loc3.replace(/^\//, "")}`) 
+                               : `${MEV_BASE}/MuestraCausas.asp?radio=xCa&pOrden=xCa&pOrdenAD=Asc`;
+      const step3b = await makeRequest(muestraUrl, {
+        headers: { Cookie: cookies, Referer: `${MEV_BASE}/POSLoguin.asp` }
+      });
+      cookies = mergeCookies(cookies, extractCookies(step3b.headers));
+      muestraHtml = step3b.body;
+
+      // PASO 4: POST búsqueda
+      const today = new Date();
+      const dateStr = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`;
+
+      const searchData = querystring.stringify({
+        OpcionBusqueda: "0",
+        busca: caratula,
+        JuzgadoElegido: "",
+        radio: "xCa",
+        caratula: caratula,
+        NCausa: "",
+        NInterno: "",
+        Set: "",
+        Desde: "01/01/2020",
+        Hasta: dateStr,
+        SetNovedades: "",
+        TipoCausa: "Am",
+        Buscar: "Buscar",
+      });
+
+      const step4 = await makeRequest(`${MEV_BASE}/Busqueda.asp`, {
+        method: "POST",
+        headers: { Cookie: cookies, Referer: muestraUrl },
+      }, searchData);
+      cookies = mergeCookies(cookies, extractCookies(step4.headers));
+
+      // Seguir redirect a resultados
+      let resultHtml = step4.body;
+      if (step4.status === 302) {
+        const loc4 = step4.headers["location"] || "";
+        const resultUrl = loc4.startsWith("http") ? loc4 : `${MEV_BASE}/${loc4.replace(/^\//, "")}`;
+        const step4b = await makeRequest(resultUrl, {
+          headers: { Cookie: cookies, Referer: `${MEV_BASE}/Busqueda.asp` }
+        });
+        cookies = mergeCookies(cookies, extractCookies(step4b.headers));
+        resultHtml = step4b.body;
+      }
+
+      // Parsear expedientes
+      const expedientes = [];
+      const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+      let rowMatch;
+      while ((rowMatch = rowRegex.exec(resultHtml)) !== null) {
+        const row = rowMatch[1];
+        const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+        const link = row.match(/href="([^"]+)"/i);
+        if (cells.length >= 3 && link) {
+          const caratulaText = getText(cells[0]?.[1] || "");
+          if (caratulaText.length > 5 && caratulaText.includes("/")) {
+            const href = link[1];
+            const fullUrl = href.startsWith("http") ? href : `${MEV_BASE}/${href.replace(/^\//, "")}`;
+            expedientes.push({
+              caratula: caratulaText,
+              organismo: getText(cells[1]?.[1] || ""),
+              expediente: getText(cells[2]?.[1] || ""),
+              fecha: getText(cells[3]?.[1] || ""),
+              ultimo: getText(cells[4]?.[1] || ""),
+              url: fullUrl,
+            });
+          }
+        }
+      }
+
+      return {
+        statusCode: 200, headers: corsHeaders,
+        body: JSON.stringify({
+          success: true,
+          expedientes,
+          cookies,
+          raw: resultHtml.substring(0, 1000),
+        }),
+      };
+    }
+
     return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: "Acción no válida" }) };
 
   } catch (err) {
